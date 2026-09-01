@@ -257,25 +257,9 @@ Panel {
     root.close()
   }
 
-  function notify(title, body) {
-    Quickshell.execDetached([
-      "notify-send", "-a", "evo.github", "-t", "5000",
-      String(title || "GitHub"), String(body || "")
-    ])
-  }
-
-  function runRepoAction(script, path, action, repoName) {
+  function runRepoAction(script, path) {
     var dir = path ? String(path) : ""
     if (!dir || !script) return
-    var name = repoName ? String(repoName) : (dir.split("/").pop() || "repo")
-    var body = ""
-    if (action === "commit")
-      body = "Starting Omarchy agent in " + name
-    else if (action === "push")
-      body = "Opening git push for " + name
-    else
-      body = "Opening terminal for " + name
-    notify("GitHub", body)
     Quickshell.execDetached(["bash", script, dir])
   }
 
@@ -934,14 +918,14 @@ Panel {
                             tooltip: "Commit with agent"
                             visible: modelData.unstaged === true
                             iconColor: root.urgent
-                            onClicked: root.runRepoAction(root.repoCommitScript, modelData.path, "commit", modelData.name)
+                            onClicked: root.runRepoAction(root.repoCommitScript, modelData.path)
                           }
 
                           RepoIconButton {
                             icon: "󰁝"
                             tooltip: "Push"
                             visible: (parseInt(modelData.unpushed, 10) || 0) > 0
-                            onClicked: root.runRepoAction(root.repoPushScript, modelData.path, "push", modelData.name)
+                            onClicked: root.runRepoAction(root.repoPushScript, modelData.path)
                           }
 
                           RepoIconButton {
