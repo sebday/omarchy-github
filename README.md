@@ -33,34 +33,6 @@ echo 'GITHUB_TOKEN=ghp_...' > ~/.config/environment.d/github.conf
 pass insert omarchy/github/token
 ```
 
-Optional `GITHUB_USERNAME` overrides the login shown in the panel when set.
-
-## Bar
-
-| Click | Action |
-|---|---|
-| Left | Toggle the contributions panel |
-
-| State | Appearance |
-|---|---|
-| Contributions today | Accent icon |
-| Error | Urgent |
-| Loading | Pulsing |
-| No data | Dimmed |
-
-The bar tooltip shows today's contribution count. Data is cached for five minutes; opening the panel always fetches fresh contribution and repo stats.
-
-## Panel
-
-Left-click the bar icon for:
-
-- **Today** — contribution count and link to your GitHub profile
-- **Stats** — 30-day total, current streak, best day, and dirty repo count
-- **Trends** — 30-day sparkline with hover tooltips
-- **Local repos** — dirty or unpushed repos; click a row to open a terminal in that folder
-
-Repo scans cover `~/projects` and `~/work`, flagging unstaged changes and unpushed commits only.
-
 ## Settings
 
 ```bash
