@@ -6,6 +6,8 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/bar"
 CACHE_PATH="${CACHE_DIR}/github.json"
 CACHE_TTL="${GITHUB_CACHE_TTL:-300}"
 HEATMAP_DAYS=30
+FORCE_REFRESH=false
+[[ "${1:-}" == "--refresh" ]] && FORCE_REFRESH=true
 
 declare -a GITHUB_COLORS=("#45475a" "#89b4fa" "#74c7ec" "#89dceb" "#cba6f7")
 
@@ -97,7 +99,7 @@ build_heatmap_json() {
   printf '%s' "$lines" | jq -s '.'
 }
 
-if cached=$(cache_read 2>/dev/null); then
+if [[ "$FORCE_REFRESH" != true ]] && cached=$(cache_read 2>/dev/null); then
   printf '%s\n' "$cached"
   exit 0
 fi

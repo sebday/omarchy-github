@@ -153,15 +153,17 @@ Panel {
     shownBest = data.best || 0
   }
 
-  function refresh(forceRepos) {
-    refreshGithub()
-    refreshRepos(forceRepos === true)
+  function refresh(force) {
+    refreshGithub(force === true)
+    refreshRepos(force === true)
   }
 
-  function refreshGithub() {
+  function refreshGithub(forceRefresh) {
     if (!statusScript || statusProc.running) return
     if (!hasData) loading = true
-    statusProc.command = ["bash", statusScript]
+    var cmd = ["bash", statusScript]
+    if (forceRefresh === true) cmd.push("--refresh")
+    statusProc.command = cmd
     statusProc.running = true
   }
 
@@ -217,7 +219,7 @@ Panel {
   }
 
   onOpenedChanged: if (opened) {
-    refreshGithub()
+    refreshGithub(true)
     refreshRepos(true)
     trendsHoveredIndex = -1
     revealProgress = 0
