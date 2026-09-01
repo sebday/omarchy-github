@@ -63,8 +63,15 @@ load_token() {
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     return 0
   fi
-  command -v pass >/dev/null 2>&1 || return 1
   local value
+  if command -v gh >/dev/null 2>&1; then
+    value="$(gh auth token 2>/dev/null || true)"
+    if [[ -n "$value" ]]; then
+      export GITHUB_TOKEN="$value"
+      return 0
+    fi
+  fi
+  command -v pass >/dev/null 2>&1 || return 1
   value="$(pass show omarchy/github/token 2>/dev/null || true)"
   if [[ -n "$value" ]]; then
     export GITHUB_TOKEN="$value"
@@ -105,7 +112,7 @@ if [[ "$FORCE_REFRESH" != true ]] && cached=$(cache_read 2>/dev/null); then
 fi
 
 if ! load_token; then
-  json_error " Token Err" "Set GITHUB_TOKEN: pass insert omarchy/github/token"
+  json_error " Token Err" "Run gh auth login, set GITHUB_TOKEN, or pass insert omarchy/github/token"
   exit 1
 fi
 
