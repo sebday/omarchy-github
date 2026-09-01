@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# List git repos under ~/projects and ~/work with unstaged changes or unpushed commits.
+# List git repos under configured roots with unstaged changes or unpushed commits.
 set -euo pipefail
+
+_bin_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_settings_script="${_bin_dir}/repo-settings"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/bar"
 CACHE_PATH="${CACHE_DIR}/repo-dirty.json"
@@ -9,12 +12,13 @@ FORCE_REFRESH=false
 [[ "${1:-}" == "--refresh" ]] && FORCE_REFRESH=true
 
 json_ok() {
-  jq -cn --argjson repos "$1" '{ok: true, repos: $repos}'
+  jq -cn --argjson repos "$1" --argjson unconfigured "${2:-false}" --argjson repoRoots "${3:-[]}" \
+    '{ok: true, repos: $repos, unconfigured: $unconfigured, repoRoots: $repoRoots}'
 }
 
 json_error() {
   local text="$1"
-  jq -cn --arg text "$text" '{ok: false, error: $text, repos: []}'
+  jq -cn --arg text "$text" '{ok: false, error: $text, repos: [], unconfigured: false}'
 }
 
 cache_read() {
@@ -106,25 +110,44 @@ scan_root() {
   shopt -u nullglob
 }
 
+load_settings() {
+  bash "$_settings_script" get 2>/dev/null || echo '{"ok":false,"configured":false,"repoRoots":[]}'
+}
+
 if [[ "$FORCE_REFRESH" != true ]] && cached=$(cache_read 2>/dev/null); then
   printf '%s\n' "$cached"
   exit 0
 fi
 
+settings="$(load_settings)"
+configured="$(jq -r '.configured // false' <<<"$settings")"
+if [[ "$configured" != "true" ]]; then
+  output=$(json_ok '[]' true '[]')
+  printf '%s\n' "$output" | cache_write
+  printf '%s\n' "$output"
+  exit 0
+fi
+
+roots_json="$(jq -c '.repoRoots // []' <<<"$settings")"
+root_count="$(jq -r 'length' <<<"$roots_json")"
+
 lines=""
-while IFS= read -r line; do
-  [[ -n "$line" ]] || continue
-  lines+="$line"$'\n'
-done < <(
-  scan_root "${HOME}/projects" "projects"
-  scan_root "${HOME}/work" "work"
-)
+if (( root_count > 0 )); then
+  while IFS=$'\t' read -r root_path root_label; do
+    [[ -n "$root_path" ]] || continue
+    [[ -z "$root_label" ]] && root_label="$(basename "$root_path")"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      lines+="$line"$'\n'
+    done < <(scan_root "$root_path" "$root_label")
+  done < <(jq -r '.[] | [.path, (.label // "")] | @tsv' <<<"$roots_json")
+fi
 
 if [[ -z "${lines//[[:space:]]/}" ]]; then
-  output=$(json_ok '[]')
+  output=$(json_ok '[]' false "$roots_json")
 else
   repos=$(printf '%s' "$lines" | jq -s 'sort_by(.name)')
-  output=$(json_ok "$repos")
+  output=$(json_ok "$repos" false "$roots_json")
 fi
 
 printf '%s\n' "$output" | cache_write

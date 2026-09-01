@@ -144,24 +144,117 @@ function sparkBars(cells, colors, trendMax) {
 
 function parseRepoPayload(raw) {
   var text = String(raw || "").trim()
-  if (!text) return { ok: false, error: "No data", repos: [] }
+  if (!text) return { ok: false, error: "No data", repos: [], unconfigured: false, repoRoots: [] }
 
   try {
     var json = JSON.parse(text)
   } catch (e) {
-    return { ok: false, error: "Invalid response", repos: [] }
+    return { ok: false, error: "Invalid response", repos: [], unconfigured: false, repoRoots: [] }
   }
 
   if (json.ok !== true) {
     return {
       ok: false,
       error: String(json.error || "Scan failed"),
-      repos: []
+      repos: [],
+      unconfigured: false,
+      repoRoots: []
     }
   }
 
   var repos = Array.isArray(json.repos) ? json.repos : []
-  return { ok: true, repos: repos, error: "" }
+  var repoRoots = Array.isArray(json.repoRoots) ? json.repoRoots : []
+  return {
+    ok: true,
+    repos: repos,
+    error: "",
+    unconfigured: json.unconfigured === true,
+    repoRoots: repoRoots
+  }
+}
+
+function parseRepoDetectPayload(raw) {
+  var text = String(raw || "").trim()
+  if (!text) return { ok: false, error: "No data", candidates: [] }
+
+  try {
+    var json = JSON.parse(text)
+  } catch (e) {
+    return { ok: false, error: "Invalid response", candidates: [] }
+  }
+
+  if (json.ok !== true) {
+    return {
+      ok: false,
+      error: String(json.error || "Detect failed"),
+      candidates: []
+    }
+  }
+
+  var candidates = Array.isArray(json.candidates) ? json.candidates : []
+  var out = []
+  for (var i = 0; i < candidates.length; i++) {
+    var item = candidates[i] || {}
+    if (item.exists !== true) continue
+    out.push({
+      path: String(item.path || ""),
+      label: String(item.label || ""),
+      exists: true,
+      selected: true
+    })
+  }
+  return { ok: true, candidates: out, error: "" }
+}
+
+function parseRepoSettingsPayload(raw) {
+  var text = String(raw || "").trim()
+  if (!text) return { ok: false, error: "No data", configured: false, repoRoots: [] }
+
+  try {
+    var json = JSON.parse(text)
+  } catch (e) {
+    return { ok: false, error: "Invalid response", configured: false, repoRoots: [] }
+  }
+
+  if (json.ok !== true) {
+    return {
+      ok: false,
+      error: String(json.error || "Settings failed"),
+      configured: false,
+      repoRoots: []
+    }
+  }
+
+  var roots = Array.isArray(json.repoRoots) ? json.repoRoots : []
+  return {
+    ok: true,
+    configured: json.configured === true,
+    repoRoots: roots,
+    error: ""
+  }
+}
+
+function repoRootLabels(roots) {
+  if (!roots || !(roots instanceof Array)) return []
+  var labels = []
+  for (var i = 0; i < roots.length; i++) {
+    var root = roots[i]
+    if (!root) continue
+    var label = String(root.label || "").trim()
+    if (!label && root.path) {
+      var parts = String(root.path).split("/")
+      label = parts[parts.length - 1] || ""
+    }
+    if (label) labels.push(label)
+  }
+  return labels
+}
+
+function repoCleanMessage(roots) {
+  var labels = repoRootLabels(roots)
+  if (labels.length === 0)
+    return "No repo folders configured"
+  return "All clean in ~/" + labels.join(", ~/")
 }
 
 function repoStatusLabel(repo) {

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# Repo scan roots for evo.github — detect, read, and persist folder list.
+set -euo pipefail
+
+WIDGET_ID="evo.github"
+SHELL_CONFIG="${OMARCHY_SHELL_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.json}"
+CANDIDATES=(projects Projects work Work)
+
+json_error() {
+  jq -cn --arg error "$1" '{ok: false, error: $error}'
+}
+
+shell_config_json() {
+  cat "$SHELL_CONFIG" 2>/dev/null || echo '{}'
+}
+
+bar_entry_json() {
+  shell_config_json | jq -c '
+    [.bar.layout | to_entries[] | .value[]? | select(.id == "'"$WIDGET_ID"'")] | first // null
+  '
+}
+
+normalize_roots_json() {
+  local raw="${1:-[]}"
+  jq -c '
+    def root_item($path; $lbl):
+      {path: $path, label: (if $lbl == "" then ($path | split("/") | last) else $lbl end)};
+    if type == "string" and length > 0 then
+      [root_item(.; "")]
+    elif type == "array" then
+      [
+        .[] |
+        if type == "string" then root_item(.; "")
+        elif type == "object" and (.path // "") != "" then
+          root_item(.path; (.label // ""))
+        else empty end
+      ]
+    else []
+    end
+  ' <<<"$raw"
+}
+
+cmd_detect() {
+  local -a lines=()
+  local -A seen_realpaths=()
+  local name path realpath line exists
+
+  for name in "${CANDIDATES[@]}"; do
+    path="$HOME/$name"
+    exists=false
+    [[ -d "$path" ]] && exists=true
+
+    realpath=""
+    if [[ "$exists" == true ]]; then
+      realpath="$(readlink -f "$path" 2>/dev/null || true)"
+      if [[ -n "$realpath" && -n "${seen_realpaths[$realpath]:-}" ]]; then
+        continue
+      fi
+      [[ -n "$realpath" ]] && seen_realpaths["$realpath"]=1
+    fi
+
+    line="$(jq -cn \
+      --arg path "$path" \
+      --arg label "$name" \
+      --argjson exists "$exists" \
+      '{path: $path, label: $label, exists: $exists}')"
+    lines+=("$line")
+  done
+
+  if ((${#lines[@]} == 0)); then
+    jq -cn '{ok: true, candidates: []}'
+    return 0
+  fi
+
+  printf '%s\n' "${lines[@]}" | jq -s '{ok: true, candidates: .}'
+}
+
+cmd_get() {
+  local entry roots configured
+  entry="$(bar_entry_json)"
+  if [[ "$entry" == "null" ]]; then
+    jq -cn '{ok: true, configured: false, repoRoots: []}'
+    return 0
+  fi
+
+  configured="$(jq -r 'has("repoRoots")' <<<"$entry")"
+  roots="$(jq -c '.repoRoots // []' <<<"$entry")"
+  roots="$(normalize_roots_json "$roots")"
+
+  jq -cn \
+    --argjson configured "$configured" \
+    --argjson repoRoots "$roots" \
+    '{ok: true, configured: $configured, repoRoots: $repoRoots}'
+}
+
+cmd_set() {
+  local raw="${1:-}"
+  [[ -n "$raw" ]] || {
+    json_error "set requires a JSON array"
+    exit 1
+  }
+
+  local roots
+  roots="$(normalize_roots_json "$raw")" || {
+    json_error "invalid repoRoots JSON"
+    exit 1
+  }
+
+  if ! command -v omarchy >/dev/null 2>&1; then
+    json_error "omarchy CLI not found"
+    exit 1
+  fi
+
+  omarchy bar set "$WIDGET_ID" repoRoots "$roots" --json >/dev/null
+
+  jq -cn \
+    --argjson repoRoots "$roots" \
+    '{ok: true, configured: true, repoRoots: $repoRoots}'
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  repo-settings detect
+  repo-settings get
+  repo-settings set '<json-array>'
+EOF
+  exit 1
+}
+
+command="${1:-}"
+shift || true
+
+case "$command" in
+detect) cmd_detect ;;
+get) cmd_get ;;
+set) cmd_set "${1:-}" ;;
+*) usage ;;
+esac

@@ -90,6 +90,7 @@ Panel {
 
   readonly property string statusScript: Qt.resolvedUrl("bin/github-status").toString().replace("file://", "")
   readonly property string repoScript: Qt.resolvedUrl("bin/repo-dirty-status").toString().replace("file://", "")
+  readonly property string repoSettingsScript: Qt.resolvedUrl("bin/repo-settings").toString().replace("file://", "")
   readonly property string repoCommitScript: Qt.resolvedUrl("bin/repo-agent-commit").toString().replace("file://", "")
   readonly property string repoPushScript: Qt.resolvedUrl("bin/repo-git-push").toString().replace("file://", "")
   readonly property int refreshMinutes: Math.max(5, parseInt(setting("refreshMinutes", 15), 10) || 15)
@@ -97,10 +98,19 @@ Panel {
   property bool repoLoading: true
   property bool repoLoaded: false
   property var repoData: ({ ok: true, repos: [], error: "" })
+  property bool repoUnconfigured: false
+  property var configuredRepoRoots: []
+  property var repoSetupCandidates: []
+  property string repoSetupError: ""
+  property bool repoSetupSaving: false
   readonly property var repoList: (repoData && repoData.ok === true && repoData.repos instanceof Array)
     ? repoData.repos : []
   readonly property bool repoError: !repoLoading && !(repoData && repoData.ok === true)
   readonly property string repoStatusText: repoData && repoData.error ? String(repoData.error) : ""
+  readonly property bool showRepoSection: root.hasData && (
+    root.repoLoading || root.repoUnconfigured || root.repoList.length > 0
+      || root.configuredRepoRoots.length > 0 || root.repoSetupCandidates.length > 0)
+  readonly property string repoCleanMessage: Model.repoCleanMessage(root.configuredRepoRoots)
   property string expandedRepoPath: ""
   readonly property var repoTotals: Model.repoTotals(root.repoList)
   readonly property int dirtyRepoCount: repoTotals.dirtyRepos
@@ -193,11 +203,51 @@ Panel {
     repoLoading = false
     repoLoaded = true
     var parsed = Model.parseRepoPayload(raw)
+    repoUnconfigured = parsed.unconfigured === true
+    if (!repoUnconfigured && parsed.repoRoots instanceof Array)
+      configuredRepoRoots = parsed.repoRoots
     repoData = {
       ok: parsed.ok === true,
       repos: parsed.ok && parsed.repos instanceof Array ? parsed.repos : [],
       error: parsed.ok ? "" : (parsed.error || "Scan failed")
     }
+    if (repoUnconfigured)
+      loadRepoSetup()
+  }
+
+  function loadRepoSetup() {
+    if (!repoSettingsScript || repoSetupProc.running) return
+    repoSetupError = ""
+    repoSetupProc.command = ["bash", repoSettingsScript, "detect"]
+    repoSetupProc.running = true
+  }
+
+  function setSetupSelected(index, selected) {
+    if (index < 0 || index >= repoSetupCandidates.length) return
+    var next = repoSetupCandidates.slice()
+    var item = next[index]
+    next[index] = {
+      path: item.path,
+      label: item.label,
+      exists: item.exists,
+      selected: selected === true
+    }
+    repoSetupCandidates = next
+  }
+
+  function saveRepoRoots() {
+    if (!repoSettingsScript || repoSettingsSaveProc.running) return
+    var roots = []
+    for (var i = 0; i < repoSetupCandidates.length; i++) {
+      var item = repoSetupCandidates[i]
+      if (item && item.selected === true)
+        roots.push({ path: String(item.path || ""), label: String(item.label || "") })
+    }
+    repoSetupSaving = true
+    repoSetupError = ""
+    repoSettingsSaveProc.rootsJson = JSON.stringify(roots)
+    repoSettingsSaveProc.command = ["bash", repoSettingsScript, "set", repoSettingsSaveProc.rootsJson]
+    repoSettingsSaveProc.running = true
   }
 
   function openRepo(path) {
@@ -207,9 +257,25 @@ Panel {
     root.close()
   }
 
-  function runRepoAction(script, path) {
+  function notify(title, body) {
+    Quickshell.execDetached([
+      "notify-send", "-a", "evo.github", "-t", "5000",
+      String(title || "GitHub"), String(body || "")
+    ])
+  }
+
+  function runRepoAction(script, path, action, repoName) {
     var dir = path ? String(path) : ""
     if (!dir || !script) return
+    var name = repoName ? String(repoName) : (dir.split("/").pop() || "repo")
+    var body = ""
+    if (action === "commit")
+      body = "Starting Omarchy agent in " + name
+    else if (action === "push")
+      body = "Opening git push for " + name
+    else
+      body = "Opening terminal for " + name
+    notify("GitHub", body)
     Quickshell.execDetached(["bash", script, dir])
   }
 
@@ -310,6 +376,57 @@ Panel {
       onStreamFinished: {
         if (String(text || "").trim() !== "" && root.repoLoading)
           root.applyRepoPayload('{"ok":false,"error":"' + String(text).replace(/"/g, '\\"') + '"}')
+      }
+    }
+  }
+
+  Process {
+    id: repoSetupProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Model.parseRepoDetectPayload(String(text || ""))
+        if (parsed.ok !== true) {
+          root.repoSetupError = parsed.error || "Detect failed"
+          root.repoSetupCandidates = []
+          return
+        }
+        root.repoSetupCandidates = parsed.candidates
+      }
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (String(text || "").trim() !== "")
+          root.repoSetupError = String(text || "").trim()
+      }
+    }
+  }
+
+  Process {
+    id: repoSettingsSaveProc
+    property string rootsJson: "[]"
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.repoSetupSaving = false
+        var parsed = Model.parseRepoSettingsPayload(String(text || ""))
+        if (parsed.ok !== true) {
+          root.repoSetupError = parsed.error || "Save failed"
+          return
+        }
+        root.repoUnconfigured = false
+        root.configuredRepoRoots = parsed.repoRoots instanceof Array ? parsed.repoRoots : []
+        root.repoSetupCandidates = []
+        root.refreshRepos(true)
+      }
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.repoSetupSaving = false
+        if (String(text || "").trim() !== "")
+          root.repoSetupError = String(text || "").trim()
       }
     }
   }
@@ -538,12 +655,12 @@ Panel {
           }
 
           PanelSeparator {
-            visible: !root.repoLoading || root.repoList.length > 0
+            visible: root.showRepoSection
             foreground: root.foreground
           }
 
           PanelSectionHeader {
-            visible: !root.repoLoading || root.repoList.length > 0
+            visible: root.showRepoSection
             width: parent.width
             text: "LOCAL REPOS"
             foreground: root.foreground
@@ -571,10 +688,81 @@ Panel {
             horizontalAlignment: Text.AlignHCenter
           }
 
+          Column {
+            width: parent.width
+            visible: root.repoUnconfigured && !root.repoLoading && !root.repoError
+            spacing: Style.space(8)
+
+            Text {
+              width: parent.width
+              text: "Choose folders to scan for dirty repos"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              model: root.repoSetupCandidates
+
+              CheckBox {
+                required property var modelData
+                required property int index
+                width: parent.width
+                text: "~/" + (modelData.label || "")
+                checked: modelData.selected === true
+                enabled: !root.repoSetupSaving
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                onCheckedChanged: if (checked !== (modelData.selected === true))
+                  root.setSetupSelected(index, checked)
+              }
+            }
+
+            Text {
+              width: parent.width
+              visible: root.repoSetupCandidates.length === 0 && root.repoSetupError === ""
+              text: "No ~/projects, ~/Projects, ~/work, or ~/Work folders found. Add paths in shell.json or run omarchy bar set evo.github repoRoots."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              width: parent.width
+              visible: root.repoSetupError !== ""
+              text: root.repoSetupError
+              color: root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            MouseArea {
+              width: saveRepoRootsLabel.implicitWidth + Style.space(12)
+              height: saveRepoRootsLabel.implicitHeight + Style.space(8)
+              enabled: !root.repoSetupSaving
+              hoverEnabled: true
+              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: root.saveRepoRoots()
+
+              Text {
+                id: saveRepoRootsLabel
+                anchors.centerIn: parent
+                text: root.repoSetupSaving ? "Saving…" : "Save folders"
+                color: parent.enabled && parent.containsMouse ? root.accent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+            }
+          }
+
           Text {
             width: parent.width
-            visible: !root.repoLoading && !root.repoError && root.repoList.length === 0
-            text: "All clean in ~/projects and ~/work"
+            visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured && root.repoList.length === 0
+            text: root.repoCleanMessage
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -584,7 +772,7 @@ Panel {
           Column {
             id: repoColumn
             width: parent.width
-            visible: !root.repoLoading && !root.repoError && root.repoList.length > 0
+            visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured && root.repoList.length > 0
             spacing: Style.space(4)
 
             Repeater {
@@ -746,14 +934,14 @@ Panel {
                             tooltip: "Commit with agent"
                             visible: modelData.unstaged === true
                             iconColor: root.urgent
-                            onClicked: root.runRepoAction(root.repoCommitScript, modelData.path)
+                            onClicked: root.runRepoAction(root.repoCommitScript, modelData.path, "commit", modelData.name)
                           }
 
                           RepoIconButton {
                             icon: "󰁝"
                             tooltip: "Push"
                             visible: (parseInt(modelData.unpushed, 10) || 0) > 0
-                            onClicked: root.runRepoAction(root.repoPushScript, modelData.path)
+                            onClicked: root.runRepoAction(root.repoPushScript, modelData.path, "push", modelData.name)
                           }
 
                           RepoIconButton {

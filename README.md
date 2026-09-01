@@ -2,7 +2,7 @@
 
 ![Bar panel](preview.png)
 
-Bar widget for GitHub contributions: today's count, 30-day stats, an activity trends chart, and local dirty repos under `~/projects` and `~/work`.
+Bar widget for GitHub contributions: today's count, 30-day stats, an activity heatmap, and local dirty repos under folders you choose on first open.
 
 ## Install
 
@@ -42,6 +42,31 @@ omarchy bar set evo.github refreshMinutes 15 --json
 | Key | Default | What it does |
 |---|---|---|
 | `refreshMinutes` | `15` | Background refresh interval for contributions and repos |
+| `repoRoots` | unset | Folders to scan for dirty git repos (set on first open or manually) |
+
+## Local repos
+
+On first open, the panel detects `~/projects`, `~/Projects`, `~/work`, and `~/Work` and asks which folders to scan. Until you save, no repo scan runs.
+
+You can also configure roots manually in `shell.json` on the `evo.github` bar entry:
+
+```json
+{
+  "id": "evo.github",
+  "repoRoots": [
+    { "path": "/home/you/projects", "label": "projects" },
+    { "path": "/home/you/work", "label": "work" }
+  ]
+}
+```
+
+Or from the shell:
+
+```bash
+omarchy bar set evo.github repoRoots '[{"path":"/home/you/projects","label":"projects"}]' --json
+```
+
+(`--json` must come after the value.)
 
 ## IPC
 

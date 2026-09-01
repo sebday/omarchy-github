@@ -16,6 +16,9 @@
     "description": "Contribution count and activity heatmap",
     "category": "Info",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "refreshMinutes": 15
+    }
   }
 }
