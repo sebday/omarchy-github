@@ -188,3 +188,34 @@ function repoTotals(repos) {
   }
   return { dirtyRepos: dirtyRepos, unpushedRepos: unpushedRepos }
 }
+
+function unstagedPillLabel(count) {
+  var n = parseInt(count, 10) || 0
+  return n + (n === 1 ? " unstaged" : " unstaged")
+}
+
+function unpushedPillLabel(count) {
+  var n = parseInt(count, 10) || 0
+  return n + (n === 1 ? " push" : " pushes")
+}
+
+function shortRemote(url) {
+  var value = String(url || "").trim()
+  if (!value) return ""
+  return value
+    .replace(/^git@github\.com:/, "")
+    .replace(/^https?:\/\/github\.com\//, "")
+    .replace(/\.git$/, "")
+}
+
+function repoDetailItems(repo) {
+  if (!repo) return []
+
+  var items = []
+  if (repo.branch) items.push({ label: "Branch", value: String(repo.branch) })
+  var remote = shortRemote(repo.remote)
+  if (remote) items.push({ label: "Remote", value: remote })
+  if (repo.lastCommit) items.push({ label: "Last commit", value: String(repo.lastCommit) })
+  if (repo.path) items.push({ label: "Path", value: String(repo.path) })
+  return items
+}

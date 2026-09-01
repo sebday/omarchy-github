@@ -73,16 +73,23 @@ inspect_repo() {
   fi
 
   if [[ "$unstaged" == true || "$unpushed" -gt 0 ]]; then
-    local status="${status_parts[*]}"
+    local status branch remote last_commit
+    status="${status_parts[*]}"
+    branch="$(git -C "$dir" branch --show-current 2>/dev/null || true)"
+    remote="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
+    last_commit="$(git -C "$dir" log -1 --format='%h · %s' 2>/dev/null || true)"
     jq -cn \
       --arg name "$name" \
       --arg path "$dir" \
       --arg parent "$parent" \
+      --arg branch "$branch" \
+      --arg remote "$remote" \
+      --arg lastCommit "$last_commit" \
       --argjson unstaged "$unstaged" \
       --argjson dirtyCount "$dirty_count" \
       --argjson unpushed "$unpushed" \
       --arg status "$status" \
-      '{name: $name, path: $path, parent: $parent, unstaged: $unstaged, dirtyCount: $dirtyCount, unpushed: $unpushed, status: $status}'
+      '{name: $name, path: $path, parent: $parent, branch: $branch, remote: $remote, lastCommit: $lastCommit, unstaged: $unstaged, dirtyCount: $dirtyCount, unpushed: $unpushed, status: $status}'
   fi
 }
 

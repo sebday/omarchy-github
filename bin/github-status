@@ -8,6 +8,7 @@ CACHE_TTL="${GITHUB_CACHE_TTL:-300}"
 HEATMAP_DAYS=30
 FORCE_REFRESH=false
 [[ "${1:-}" == "--refresh" ]] && FORCE_REFRESH=true
+TOKEN=""
 
 declare -a GITHUB_COLORS=("#45475a" "#89b4fa" "#74c7ec" "#89dceb" "#cba6f7")
 
@@ -60,21 +61,18 @@ cache_write() {
 }
 
 load_token() {
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    return 0
-  fi
   local value
   if command -v gh >/dev/null 2>&1; then
     value="$(gh auth token 2>/dev/null || true)"
     if [[ -n "$value" ]]; then
-      export GITHUB_TOKEN="$value"
+      TOKEN="$value"
       return 0
     fi
   fi
   command -v pass >/dev/null 2>&1 || return 1
   value="$(pass show omarchy/github/token 2>/dev/null || true)"
   if [[ -n "$value" ]]; then
-    export GITHUB_TOKEN="$value"
+    TOKEN="$value"
     return 0
   fi
   return 1
@@ -112,11 +110,9 @@ if [[ "$FORCE_REFRESH" != true ]] && cached=$(cache_read 2>/dev/null); then
 fi
 
 if ! load_token; then
-  json_error " Token Err" "Run gh auth login, set GITHUB_TOKEN, or pass insert omarchy/github/token"
+  json_error " Token Err" "Run gh auth login or pass insert omarchy/github/token"
   exit 1
 fi
-
-TOKEN="${GITHUB_TOKEN:-}"
 
 GRAPHQL_QUERY_RAW='
 query GetViewerContributionCalendar {

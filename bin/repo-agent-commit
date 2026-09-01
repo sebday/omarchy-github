@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Launch omarchy agent in a repo to review changes and create a commit.
+set -euo pipefail
+
+dir=${1:?repo path required}
+prompt="Review the git changes in this repository, stage the appropriate files, and create a commit with a concise message that follows the project's commit conventions. Do not push."
+
+exec xdg-terminal-exec --dir="$dir" omarchy agent prompt "$prompt"

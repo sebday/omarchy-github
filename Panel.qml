@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -33,10 +34,14 @@ Panel {
   property real shownStreak: 0
   property real shownBest: 0
   property real revealProgress: 0
+  property int todayCelebrateToken: 0
 
-  Behavior on shownToday {
-    enabled: !root.loading
-    NumberAnimation { duration: 500; easing.type: Easing.OutCubic }
+  NumberAnimation {
+    id: todayCountAnim
+    target: root
+    property: "shownToday"
+    easing.type: Easing.OutCubic
+    onFinished: root.todayCelebrateToken++
   }
 
   Behavior on shownTotal30 {
@@ -74,10 +79,8 @@ Panel {
     ? (data.today + " contribution" + (data.today === 1 ? "" : "s") + " today")
     : "GitHub contributions"
 
-  readonly property int trendMax: 40
-  readonly property int trendChartHeight: 88
   readonly property int trendsSpacing: 3
-  readonly property var sparkBars: hasData ? Model.sparkBars(cells, palette, trendMax) : []
+  readonly property var trendCells: hasData ? Model.sparkBars(cells, palette, 40) : []
   readonly property string todayLabel: (data && data.today === 1)
     ? "contribution today"
     : "contributions today"
@@ -87,6 +90,8 @@ Panel {
 
   readonly property string statusScript: Qt.resolvedUrl("bin/github-status").toString().replace("file://", "")
   readonly property string repoScript: Qt.resolvedUrl("bin/repo-dirty-status").toString().replace("file://", "")
+  readonly property string repoCommitScript: Qt.resolvedUrl("bin/repo-agent-commit").toString().replace("file://", "")
+  readonly property string repoPushScript: Qt.resolvedUrl("bin/repo-git-push").toString().replace("file://", "")
   readonly property int refreshMinutes: Math.max(5, parseInt(setting("refreshMinutes", 15), 10) || 15)
 
   property bool repoLoading: true
@@ -96,17 +101,9 @@ Panel {
     ? repoData.repos : []
   readonly property bool repoError: !repoLoading && !(repoData && repoData.ok === true)
   readonly property string repoStatusText: repoData && repoData.error ? String(repoData.error) : ""
-  readonly property int repoMaxVisible: 3
-  readonly property int repoRowHeight: Style.space(40)
+  property string expandedRepoPath: ""
   readonly property var repoTotals: Model.repoTotals(root.repoList)
   readonly property int dirtyRepoCount: repoTotals.dirtyRepos
-  property int trendsHoveredIndex: -1
-  readonly property string trendsHoverText: {
-    if (trendsHoveredIndex < 0 || trendsHoveredIndex >= cells.length)
-      return ""
-    var cell = cells[trendsHoveredIndex] || {}
-    return Model.formatCellTooltip(cell.date, cell.count)
-  }
 
   function emptyData() {
     return {
@@ -140,6 +137,7 @@ Panel {
 
   function syncAnimatedStats() {
     if (!hasData) {
+      todayCountAnim.stop()
       shownToday = 0
       shownTotal30 = 0
       shownStreak = 0
@@ -147,10 +145,25 @@ Panel {
       return
     }
 
-    shownToday = data.today || 0
+    animateTodayCountTo(data.today || 0, false)
     shownTotal30 = data.total30 || 0
     shownStreak = data.streak || 0
     shownBest = data.best || 0
+  }
+
+  function animateTodayCountTo(target, fromZero) {
+    var next = Number(target) || 0
+    var start = fromZero ? 0 : shownToday
+    if (!fromZero && Math.round(start) === Math.round(next)) {
+      shownToday = next
+      return
+    }
+
+    todayCountAnim.stop()
+    todayCountAnim.from = fromZero ? 0 : start
+    todayCountAnim.to = next
+    todayCountAnim.duration = Math.min(1100, Math.max(480, next * 24))
+    todayCountAnim.start()
   }
 
   function refresh(force) {
@@ -194,6 +207,22 @@ Panel {
     root.close()
   }
 
+  function runRepoAction(script, path) {
+    var dir = path ? String(path) : ""
+    if (!dir || !script) return
+    Quickshell.execDetached(["bash", script, dir])
+  }
+
+  function toggleRepoExpand(path) {
+    var dir = path ? String(path) : ""
+    if (!dir) return
+    expandedRepoPath = expandedRepoPath === dir ? "" : dir
+  }
+
+  function repoExpanded(path) {
+    return expandedRepoPath !== "" && expandedRepoPath === String(path || "")
+  }
+
   function openProfile() {
     var url = data && data.profileUrl ? String(data.profileUrl) : "https://github.com/"
     Quickshell.execDetached(["xdg-open", url])
@@ -221,10 +250,12 @@ Panel {
   onOpenedChanged: if (opened) {
     refreshGithub(true)
     refreshRepos(true)
-    trendsHoveredIndex = -1
     revealProgress = 0
     revealAnimation.restart()
+    animateTodayCountTo(hasData ? (data.today || 0) : 0, true)
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  } else {
+    expandedRepoPath = ""
   }
 
   Process {
@@ -384,6 +415,7 @@ Panel {
                   value: root.shownToday
                   fillColor: root.todayIconColor
                   fontFamily: root.fontFamily
+                  celebrateToken: root.todayCelebrateToken
                 }
               }
             }
@@ -423,122 +455,86 @@ Panel {
             }
           }
 
-          PanelSeparator {
-            visible: !root.loading && root.hasData
-            foreground: root.foreground
-          }
-
-          Item {
-            id: trendsHeader
+          Column {
             width: parent.width
+            spacing: Style.space(4)
             visible: !root.loading && root.hasData
-            height: trendsTitle.height
 
-            PanelSectionHeader {
-              id: trendsTitle
+            Item {
+              id: trendsTrack
               width: parent.width
-              text: "TRENDS"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
+              visible: root.cells.length > 0
+              implicitHeight: trendsRow.height
 
-            Text {
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              width: parent.width * 0.68
-              visible: root.trendsHoveredIndex >= 0
-              text: root.trendsHoverText
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignRight
-              elide: Text.ElideLeft
-            }
-          }
+              readonly property int cellCount: root.cells.length
+              readonly property int cellSize: cellCount > 0
+                ? Math.max(7, Math.min(11, Math.floor(
+                    (width - Math.max(0, cellCount - 1) * root.trendsSpacing) / cellCount)))
+                : 8
+              readonly property int rowHeight: cellSize + Style.space(2)
+              readonly property int chartWidth: cellCount > 0
+                ? cellCount * cellSize + Math.max(0, cellCount - 1) * root.trendsSpacing
+                : 0
 
-          Item {
-            id: trendsTrack
-            width: parent.width
-            visible: !root.loading && root.hasData && root.cells.length > 0
-            implicitHeight: trendsRow.height
+              Row {
+                id: trendsRow
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: trendsTrack.chartWidth
+                spacing: root.trendsSpacing
 
-            readonly property int cellCount: root.cells.length
-            readonly property int cellWidth: cellCount > 0
-              ? Math.max(6, Math.min(10, Math.floor(
-                  (width - Math.max(0, cellCount - 1) * root.trendsSpacing) / cellCount)))
-              : 8
-            readonly property int chartWidth: cellCount > 0
-              ? cellCount * cellWidth + Math.max(0, cellCount - 1) * root.trendsSpacing
-              : 0
-
-            Row {
-              id: trendsRow
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: trendsTrack.chartWidth
-              spacing: root.trendsSpacing
-
-              Repeater {
-                model: root.cells
-
-                Item {
-                  required property var modelData
-                  required property int index
-                  readonly property var bar: root.sparkBars[index] || {}
-                  readonly property bool cellHovered: hitArea.containsMouse
-                  readonly property real cellReveal: Math.min(
-                    1, Math.max(0, root.revealProgress * trendsTrack.cellCount - index))
-
-                  width: trendsTrack.cellWidth
-                  implicitHeight: root.trendChartHeight
-                  opacity: cellReveal
-                  scale: 0.85 + 0.15 * cellReveal
-                  transformOrigin: Item.Bottom
+                Repeater {
+                  model: root.cells
 
                   Item {
-                    width: parent.width
-                    height: root.trendChartHeight
+                    required property var modelData
+                    required property int index
+                    readonly property var cell: root.trendCells[index] || {}
+                    readonly property bool cellHovered: hitArea.containsMouse
+                    readonly property real cellReveal: Math.min(
+                      1, Math.max(0, root.revealProgress * trendsTrack.cellCount - index))
+
+                    width: trendsTrack.cellSize
+                    height: trendsTrack.rowHeight
+                    opacity: cellReveal
+                    scale: 0.85 + 0.15 * cellReveal
+                    transformOrigin: Item.Bottom
 
                     Rectangle {
-                      width: parent.width
-                      height: bar.level > 0
-                        ? Math.max(2, parent.height * bar.level / 7)
-                        : 0
+                      width: trendsTrack.cellSize
+                      height: trendsTrack.cellSize
                       anchors.bottom: parent.bottom
-                      radius: Math.max(2, Style.cornerRadius)
-                      color: bar.color || root.accent
-                      opacity: cellHovered ? 1 : 0.85
-                      transformOrigin: Item.Bottom
-                      scale: cellHovered ? 1.06 : 1
+                      anchors.horizontalCenter: parent.horizontalCenter
+                      radius: 1
+                      color: parent.cell.color || root.palette[0]
+                      opacity: parent.cellHovered ? 1 : ((parent.cell.value || 0) > 0 ? 0.92 : 0.55)
+                      scale: parent.cellHovered ? 1.12 : 1
+                      transformOrigin: Item.Center
 
                       Behavior on scale {
                         NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
                       }
                     }
-                  }
 
-                  MouseArea {
-                    id: hitArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onContainsMouseChanged: {
-                      if (containsMouse)
-                        root.trendsHoveredIndex = index
-                      else if (root.trendsHoveredIndex === index)
-                        root.trendsHoveredIndex = -1
+                    MouseArea {
+                      id: hitArea
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      acceptedButtons: Qt.NoButton
                     }
                   }
                 }
               }
             }
-          }
 
-          Text {
-            width: parent.width
-            visible: !root.loading && root.hasData && root.cells.length === 0
-            text: "No activity data"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
+            Text {
+              width: parent.width
+              visible: root.cells.length === 0
+              text: "No activity data"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              horizontalAlignment: Text.AlignHCenter
+            }
           }
 
           PanelSeparator {
@@ -585,84 +581,186 @@ Panel {
             horizontalAlignment: Text.AlignHCenter
           }
 
-          Item {
+          Column {
+            id: repoColumn
             width: parent.width
             visible: !root.repoLoading && !root.repoError && root.repoList.length > 0
-            height: Math.min(root.repoList.length, root.repoMaxVisible) * root.repoRowHeight
+            spacing: Style.space(4)
 
-            Flickable {
-              anchors.fill: parent
-              clip: true
-              boundsBehavior: Flickable.StopAtBounds
-              flickableDirection: Flickable.VerticalFlick
-              interactive: root.repoList.length > root.repoMaxVisible
-              contentHeight: root.repoList.length * root.repoRowHeight
+            Repeater {
+              model: root.repoList
 
-              Column {
-                width: parent.width
-                spacing: 0
+              Item {
+                required property var modelData
+                readonly property bool repoOpen: root.repoExpanded(modelData.path)
+                width: repoColumn.width
+                implicitHeight: repoCard.implicitHeight
 
-                Repeater {
-                  model: root.repoList
+                Rectangle {
+                  id: repoCard
+                  width: parent.width
+                  implicitHeight: repoCardColumn.implicitHeight + Style.space(8)
+                  radius: Style.cornerRadius
+                  color: (repoHeaderHit.containsMouse || root.repoExpanded(modelData.path))
+                    ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                    : "transparent"
 
-                  MouseArea {
-                    id: repoHit
-                    required property var modelData
-                    width: column.width
-                    height: root.repoRowHeight
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.openRepo(modelData.path)
+                  Column {
+                    id: repoCardColumn
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.leftMargin: Style.space(4)
+                    anchors.rightMargin: Style.space(4)
+                    anchors.topMargin: Style.space(4)
+                    spacing: Style.spacing.labelGap
 
-                    Row {
-                      id: repoRow
-                      anchors.verticalCenter: parent.verticalCenter
+                    Item {
+                      id: repoHeader
                       width: parent.width
-                      spacing: Style.space(8)
+                      implicitHeight: repoHeaderLayout.implicitHeight
 
-                      Column {
-                        width: parent.width - statusPills.width - parent.spacing
-                        spacing: Style.spacing.labelGap
+                      RowLayout {
+                        id: repoHeaderLayout
+                        width: parent.width
+                        spacing: Style.space(8)
 
-                        Text {
-                          width: parent.width
-                          text: modelData.name || ""
-                          color: repoHit.containsMouse ? root.accent : root.foreground
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.bodySmall
-                          font.bold: true
-                          elide: Text.ElideRight
+                        ColumnLayout {
+                          Layout.fillWidth: true
+                          Layout.alignment: Qt.AlignVCenter
+                          spacing: Style.spacing.labelGap
+
+                          Text {
+                            Layout.fillWidth: true
+                            text: modelData.name || ""
+                            color: (repoHeaderHit.containsMouse || root.repoExpanded(modelData.path))
+                              ? root.accent : root.foreground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.bodySmall
+                            font.bold: true
+                            elide: Text.ElideRight
+                          }
+
+                          Text {
+                            Layout.fillWidth: true
+                            text: "~/" + (modelData.parent || "projects") + "/" + (modelData.name || "")
+                            color: root.dim
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            elide: Text.ElideRight
+                          }
                         }
 
-                        Text {
-                          width: parent.width
-                          text: "~/" + (modelData.parent || "projects") + "/" + (modelData.name || "")
-                          color: root.dim
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption
-                          elide: Text.ElideRight
+                        RowLayout {
+                          Layout.alignment: Qt.AlignVCenter
+                          spacing: Style.spacing.xs
+
+                          StatusPill {
+                            visible: modelData.unstaged === true
+                            text: Model.unstagedPillLabel(modelData.dirtyCount)
+                            textColor: root.urgent
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                          }
+
+                          StatusPill {
+                            visible: (parseInt(modelData.unpushed, 10) || 0) > 0
+                            text: Model.unpushedPillLabel(modelData.unpushed)
+                            textColor: root.accent
+                            foreground: root.foreground
+                            fontFamily: root.fontFamily
+                          }
                         }
                       }
 
-                      Row {
-                        id: statusPills
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.spacing.xs
+                      MouseArea {
+                        id: repoHeaderHit
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleRepoExpand(modelData.path)
+                      }
+                    }
 
-                        StatusPill {
-                          visible: modelData.unstaged === true
-                          text: String(parseInt(modelData.dirtyCount, 10) || 0)
-                          textColor: root.urgent
-                          foreground: root.foreground
-                          fontFamily: root.fontFamily
+                    Item {
+                      id: repoDetailsClip
+                      width: parent.width
+                      height: repoOpen ? detailsColumn.implicitHeight : 0
+                      clip: true
+
+                      Behavior on height {
+                        NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
+                      }
+
+                      Column {
+                        id: detailsColumn
+                        width: parent.width
+                        spacing: Style.spacing.labelGap
+                        topPadding: Style.space(2)
+                        bottomPadding: Style.space(2)
+                        y: repoOpen ? 0 : -Style.space(6)
+                        opacity: repoOpen ? 1 : 0
+
+                        Behavior on y {
+                          NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
                         }
 
-                        StatusPill {
-                          visible: (parseInt(modelData.unpushed, 10) || 0) > 0
-                          text: String(parseInt(modelData.unpushed, 10) || 0) + "↑"
-                          textColor: root.accent
-                          foreground: root.foreground
-                          fontFamily: root.fontFamily
+                        Behavior on opacity {
+                          NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                        }
+
+                        Repeater {
+                          model: Model.repoDetailItems(modelData)
+
+                          Row {
+                            required property var modelData
+                            width: parent.width
+                            spacing: Style.space(8)
+
+                            Text {
+                              width: Style.space(72)
+                              text: modelData.label
+                              color: root.dim
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                            }
+
+                            Text {
+                              width: parent.width - Style.space(72) - parent.spacing
+                              text: modelData.value
+                              color: root.foreground
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                              wrapMode: Text.Wrap
+                            }
+                          }
+                        }
+
+                        Row {
+                          width: parent.width
+                          spacing: Style.space(2)
+                          topPadding: Style.space(4)
+
+                          RepoIconButton {
+                            icon: "󰜘"
+                            tooltip: "Commit with agent"
+                            visible: modelData.unstaged === true
+                            iconColor: root.urgent
+                            onClicked: root.runRepoAction(root.repoCommitScript, modelData.path)
+                          }
+
+                          RepoIconButton {
+                            icon: "󰁝"
+                            tooltip: "Push"
+                            visible: (parseInt(modelData.unpushed, 10) || 0) > 0
+                            onClicked: root.runRepoAction(root.repoPushScript, modelData.path)
+                          }
+
+                          RepoIconButton {
+                            icon: "󰆍"
+                            tooltip: "Open in terminal"
+                            onClicked: root.openRepo(modelData.path)
+                          }
                         }
                       }
                     }
@@ -676,18 +774,77 @@ Panel {
     }
   }
 
+  component RepoIconButton: MouseArea {
+    property string icon: ""
+    property string tooltip: ""
+    property color iconColor: root.dim
+    property color hoverColor: root.accent
+    property string fontFamily: root.fontFamily
+
+    width: iconText.implicitWidth + Style.space(10)
+    height: iconText.implicitHeight + Style.space(6)
+    hoverEnabled: true
+    cursorShape: Qt.PointingHandCursor
+
+    Text {
+      id: iconText
+      anchors.centerIn: parent
+      text: parent.icon
+      color: parent.containsMouse ? parent.hoverColor : parent.iconColor
+      font.family: parent.fontFamily
+      font.pixelSize: Style.font.body
+    }
+
+    PanelToolTip {
+      visible: parent.containsMouse
+      text: parent.tooltip
+      fontFamily: parent.fontFamily
+    }
+  }
+
   component TodayCountBadge: Rectangle {
+    id: badge
     property bool loading: false
     property real value: 0
     property color fillColor: Color.accent
     property string fontFamily: Style.font.family
+    property int celebrateToken: 0
 
     readonly property int rounded: Math.round(value)
+    property real popScale: 1
+
+    onCelebrateTokenChanged: if (celebrateToken > 0) celebrate()
+
+    function celebrate() {
+      if (loading || rounded <= 0)
+        return
+      popAnim.restart()
+    }
 
     implicitWidth: countText.implicitWidth + Style.spacing.lg * 2
     implicitHeight: countText.implicitHeight + Style.spacing.sm * 2
     radius: implicitHeight / 2
     color: Qt.rgba(fillColor.r, fillColor.g, fillColor.b, 0.14)
+    scale: popScale
+    transformOrigin: Item.Center
+
+    SequentialAnimation {
+      id: popAnim
+      NumberAnimation {
+        target: badge
+        property: "popScale"
+        to: 1.07
+        duration: 140
+        easing.type: Easing.OutCubic
+      }
+      NumberAnimation {
+        target: badge
+        property: "popScale"
+        to: 1
+        duration: 220
+        easing.type: Easing.OutBack
+      }
+    }
 
     Text {
       id: countText
@@ -708,7 +865,7 @@ Panel {
 
     implicitWidth: pillText.implicitWidth + Style.spacing.lg * 2
     implicitHeight: pillText.implicitHeight + Style.spacing.sm * 2
-    radius: implicitHeight / 2
+    radius: 0
     color: Qt.rgba(textColor.r, textColor.g, textColor.b, 0.14)
 
     Text {

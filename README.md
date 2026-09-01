@@ -16,22 +16,18 @@ A local path works the same way. Plugins run as unsandboxed code inside `omarchy
 ## Requirements
 
 - `curl`, `jq`, and `bash` on `PATH`
-- GitHub auth via `gh`, a session token, or `pass` (see below)
+- GitHub auth via `gh` or `pass` (see below)
 
 ## Auth
 
-The bar process does not see tokens exported from your interactive shell. Resolution order:
+Resolution order:
 
-1. `GITHUB_TOKEN` if the Omarchy session already has it (Hyprland env or `~/.config/environment.d/`)
-2. `gh auth token` when the GitHub CLI is installed and logged in
-3. `pass` at `omarchy/github/token`
+1. `gh auth token` when the GitHub CLI is installed and logged in
+2. `pass` at `omarchy/github/token`
 
 ```bash
 # Easiest: sign in with the GitHub CLI (gh must be on PATH for the bar)
 gh auth login
-
-# Optional session override for the bar
-echo 'GITHUB_TOKEN=ghp_...' > ~/.config/environment.d/github.conf
 
 # Optional pass fallback
 pass insert omarchy/github/token
