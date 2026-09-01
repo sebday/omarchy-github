@@ -34,6 +34,46 @@ function trendLevel(count, max) {
   return Math.max(1, Math.min(7, Math.ceil(n / cap * 7)))
 }
 
+function pad2(n) {
+  return n < 10 ? "0" + n : String(n)
+}
+
+function enrichCells(cells) {
+  var out = []
+  var today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  for (var i = 0; i < cells.length; i++) {
+    var cell = cells[i] || {}
+    var daysAgo = cells.length - 1 - i
+    var date = new Date(today)
+    date.setDate(date.getDate() - daysAgo)
+    var iso = date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate())
+
+    out.push({
+      level: cell.level,
+      count: cell.count,
+      color: cell.color,
+      date: cell.date || iso
+    })
+  }
+
+  return out
+}
+
+function formatCellTooltip(date, count) {
+  var n = parseInt(count, 10) || 0
+  var label = n === 1 ? "contribution" : "contributions"
+  if (!date) return n + " " + label
+
+  var parts = String(date).split("-")
+  if (parts.length !== 3) return n + " " + label
+
+  var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10))
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  return months[d.getMonth()] + " " + d.getDate() + " · " + n + " " + label
+}
+
 function parsePayload(raw) {
   var text = String(raw || "").trim()
   if (!text) return { ok: false, error: "No data" }
@@ -83,7 +123,7 @@ function parsePayload(raw) {
     best: best,
     username: String(json.username || ""),
     profileUrl: String(json.profileUrl || (json.username ? ("https://github.com/" + json.username) : "https://github.com/")),
-    cells: cells
+    cells: enrichCells(cells)
   }
 }
 
@@ -100,4 +140,51 @@ function sparkBars(cells, colors, trendMax) {
     })
   }
   return out
+}
+
+function parseRepoPayload(raw) {
+  var text = String(raw || "").trim()
+  if (!text) return { ok: false, error: "No data", repos: [] }
+
+  try {
+    var json = JSON.parse(text)
+  } catch (e) {
+    return { ok: false, error: "Invalid response", repos: [] }
+  }
+
+  if (json.ok !== true) {
+    return {
+      ok: false,
+      error: String(json.error || "Scan failed"),
+      repos: []
+    }
+  }
+
+  var repos = Array.isArray(json.repos) ? json.repos : []
+  return { ok: true, repos: repos, error: "" }
+}
+
+function repoStatusLabel(repo) {
+  if (!repo) return ""
+  if (repo.status) return String(repo.status)
+  var parts = []
+  if (repo.unstaged) parts.push("dirty")
+  var unpushed = parseInt(repo.unpushed, 10) || 0
+  if (unpushed > 0) parts.push(unpushed + " unpushed")
+  return parts.join(" · ")
+}
+
+function repoTotals(repos) {
+  var dirtyRepos = 0
+  var unpushedRepos = 0
+  if (!repos || !(repos instanceof Array)) {
+    return { dirtyRepos: 0, unpushedRepos: 0 }
+  }
+  for (var i = 0; i < repos.length; i++) {
+    var r = repos[i]
+    if (!r) continue
+    if (r.unstaged) dirtyRepos++
+    if ((parseInt(r.unpushed, 10) || 0) > 0) unpushedRepos++
+  }
+  return { dirtyRepos: dirtyRepos, unpushedRepos: unpushedRepos }
 }

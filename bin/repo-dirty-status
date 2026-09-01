@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# List git repos under ~/projects and ~/work with unstaged changes or unpushed commits.
+set -euo pipefail
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/bar"
+CACHE_PATH="${CACHE_DIR}/repo-dirty.json"
+CACHE_TTL="${REPO_DIRTY_CACHE_TTL:-60}"
+FORCE_REFRESH=false
+[[ "${1:-}" == "--refresh" ]] && FORCE_REFRESH=true
+
+json_ok() {
+  jq -cn --argjson repos "$1" '{ok: true, repos: $repos}'
+}
+
+json_error() {
+  local text="$1"
+  jq -cn --arg text "$text" '{ok: false, error: $text, repos: []}'
+}
+
+cache_read() {
+  [[ -f "$CACHE_PATH" ]] || return 1
+  local now mtime age
+  now=$(date +%s)
+  mtime=$(stat -c %Y "$CACHE_PATH" 2>/dev/null || echo 0)
+  age=$((now - mtime))
+  (( age < CACHE_TTL )) || return 1
+  cat "$CACHE_PATH"
+}
+
+cache_write() {
+  mkdir -p "$CACHE_DIR"
+  local tmp
+  tmp="$(mktemp "${CACHE_PATH}.XXXXXX")"
+  cat >"$tmp"
+  mv "$tmp" "$CACHE_PATH"
+}
+
+unstaged_porcelain() {
+  local dir=$1
+  git -C "$dir" status --porcelain 2>/dev/null | awk '
+    /^\?\?/ { print; next }
+    length($0) >= 2 && substr($0, 2, 1) != " " { print }
+  '
+}
+
+inspect_repo() {
+  local dir=$1 parent=$2
+  [[ -d "$dir" ]] || return 0
+  [[ -e "$dir/.git" ]] || return 0
+
+  local name unstaged unpushed ahead dirty_count=0 status_parts=()
+  name="$(basename "$dir")"
+
+  dirty_count="$(unstaged_porcelain "$dir" | wc -l | tr -d ' ')"
+  if [[ "${dirty_count:-0}" -gt 0 ]]; then
+    unstaged=true
+  else
+    unstaged=false
+    dirty_count=0
+  fi
+
+  unpushed=0
+  if git -C "$dir" rev-parse --verify '@{u}' >/dev/null 2>&1; then
+    ahead="$(git -C "$dir" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+    if [[ "${ahead:-0}" =~ ^[0-9]+$ ]] && (( ahead > 0 )); then
+      unpushed=$ahead
+      status_parts+=("${ahead} unpushed")
+    fi
+  fi
+
+  if [[ "$unstaged" == true ]]; then
+    status_parts+=("dirty")
+  fi
+
+  if [[ "$unstaged" == true || "$unpushed" -gt 0 ]]; then
+    local status="${status_parts[*]}"
+    jq -cn \
+      --arg name "$name" \
+      --arg path "$dir" \
+      --arg parent "$parent" \
+      --argjson unstaged "$unstaged" \
+      --argjson dirtyCount "$dirty_count" \
+      --argjson unpushed "$unpushed" \
+      --arg status "$status" \
+      '{name: $name, path: $path, parent: $parent, unstaged: $unstaged, dirtyCount: $dirtyCount, unpushed: $unpushed, status: $status}'
+  fi
+}
+
+scan_root() {
+  local root=$1 parent=$2
+  [[ -d "$root" ]] || return 0
+  local entry
+  shopt -s nullglob
+  for entry in "${root}"/*; do
+    [[ -d "$entry" ]] || continue
+    [[ "$(basename "$entry")" == .* ]] && continue
+    inspect_repo "$entry" "$parent" || true
+  done
+  shopt -u nullglob
+}
+
+if [[ "$FORCE_REFRESH" != true ]] && cached=$(cache_read 2>/dev/null); then
+  printf '%s\n' "$cached"
+  exit 0
+fi
+
+lines=""
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  lines+="$line"$'\n'
+done < <(
+  scan_root "${HOME}/projects" "projects"
+  scan_root "${HOME}/work" "work"
+)
+
+if [[ -z "${lines//[[:space:]]/}" ]]; then
+  output=$(json_ok '[]')
+else
+  repos=$(printf '%s' "$lines" | jq -s 'sort_by(.name)')
+  output=$(json_ok "$repos")
+fi
+
+printf '%s\n' "$output" | cache_write
+printf '%s\n' "$output"
