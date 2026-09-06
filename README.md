@@ -82,3 +82,18 @@ omarchy-shell shell toggle evo.github
 | `close` / `hide` | Close the panel |
 | `toggle` | Toggle the panel |
 | `refresh` | Refresh contributions and repos |
+
+## Removing
+
+```bash
+omarchy plugin remove evo.github
+```
+
+That deletes the plugin directory. It does not delete:
+
+- `~/.cache/omarchy/bar/github.json`
+- `~/.cache/omarchy/bar/repo-dirty.json`
+- `pass` entry `omarchy/github/token`
+- `repoRoots` on the bar entry in `~/.config/omarchy/shell.json`
+
+Network: https://api.github.com/graphql.

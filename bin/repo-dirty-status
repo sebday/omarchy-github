@@ -22,21 +22,25 @@ json_error() {
 }
 
 cache_read() {
-  [[ -f "$CACHE_PATH" ]] || return 1
-  local now mtime age
+  [[ -e "$CACHE_PATH" ]] || return 1
+  local now mtime age content
   now=$(date +%s)
   mtime=$(stat -c %Y "$CACHE_PATH" 2>/dev/null || echo 0)
   age=$((now - mtime))
   (( age < CACHE_TTL )) || return 1
-  cat "$CACHE_PATH"
+  content=$(/usr/bin/dd if="$CACHE_PATH" iflag=nofollow,nonblock,count_bytes,fullblock bs=1 count=65537 status=none) || return 1
+  [ ${#content} -le 65536 ] || return 1
+  printf '%s' "$content"
 }
 
 cache_write() {
-  mkdir -p "$CACHE_DIR"
+  mkdir -p -m 700 "$CACHE_DIR" || return 1
+  [[ ! -L "$CACHE_DIR" && -d "$CACHE_DIR" ]] || return 1
+  umask 077
   local tmp
-  tmp="$(mktemp "${CACHE_PATH}.XXXXXX")"
-  cat >"$tmp"
-  mv "$tmp" "$CACHE_PATH"
+  tmp="$(/usr/bin/mktemp -p "$CACHE_DIR" .repo-dirty.XXXXXXXXXX)" || return 1
+  cat >"$tmp" || { rm -f -- "$tmp"; return 1; }
+  mv -f -T -- "$tmp" "$CACHE_PATH"
 }
 
 unstaged_porcelain() {

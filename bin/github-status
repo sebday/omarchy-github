@@ -43,21 +43,27 @@ json_error() {
 }
 
 cache_read() {
-  [[ -f "$CACHE_PATH" ]] || return 1
-  local now mtime age
+  [[ -e "$CACHE_PATH" ]] || return 1
+  local now mtime age content
   now=$(date +%s)
   mtime=$(stat -c %Y "$CACHE_PATH" 2>/dev/null || echo 0)
   age=$((now - mtime))
   (( age < CACHE_TTL )) || return 1
-  cat "$CACHE_PATH"
+  content=$(/usr/bin/dd if="$CACHE_PATH" iflag=nofollow,nonblock,count_bytes,fullblock bs=1 count=65537 status=none) || return 1
+  [ ${#content} -le 65536 ] || return 1
+  printf '%s' "$content"
 }
 
 cache_write() {
-  mkdir -p "$CACHE_DIR"
+  local dir="$CACHE_DIR"
+  mkdir -p -m 700 "$dir" || return 1
+  [[ ! -L "$dir" && -d "$dir" ]] || return 1
+  [[ "$(stat -c %u "$dir")" == "$(id -u)" ]] || return 1
+  umask 077
   local tmp
-  tmp="$(mktemp "${CACHE_PATH}.XXXXXX")"
-  cat >"$tmp"
-  mv "$tmp" "$CACHE_PATH"
+  tmp="$(/usr/bin/mktemp -p "$dir" .github.XXXXXXXXXX)" || return 1
+  cat >"$tmp" || { rm -f -- "$tmp"; return 1; }
+  mv -f -T -- "$tmp" "$CACHE_PATH"
 }
 
 load_token() {
@@ -113,6 +119,11 @@ if ! load_token; then
   json_error " Token Err" "Run gh auth login or pass insert omarchy/github/token"
   exit 1
 fi
+case "$TOKEN" in *'"'*|*\\*|$'\n'*)
+  json_error " Token Err" "GitHub token contains unsupported characters."
+  exit 1
+  ;;
+esac
 
 GRAPHQL_QUERY_RAW='
 query GetViewerContributionCalendar {
@@ -134,12 +145,22 @@ query GetViewerContributionCalendar {
 GRAPHQL_QUERY_ESCAPED=$(echo "$GRAPHQL_QUERY_RAW" | tr '\n' ' ' | sed 's/"/\\"/g')
 JSON_PAYLOAD=$(printf '{ "query": "%s" }' "$GRAPHQL_QUERY_ESCAPED")
 
-RESPONSE=$(curl -s -L \
-  -H "Authorization: bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -X POST \
-  -d "${JSON_PAYLOAD}" \
-  "https://api.github.com/graphql")
+set -o pipefail
+MAX_BYTES=1048576
+RESPONSE=$(
+  printf '%s\n' \
+    "header = \"Authorization: bearer ${TOKEN}\"" \
+    'header = "Content-Type: application/json"' \
+    | /usr/bin/curl -q -sS --fail --config - \
+        --proto '=https' --proto-redir '=https' \
+        --max-time 20 --connect-timeout 5 --max-filesize "$MAX_BYTES" --noproxy '*' \
+        -X POST --data-binary "${JSON_PAYLOAD}" -- "https://api.github.com/graphql" \
+    | /usr/bin/head -c $((MAX_BYTES + 1))
+) || RESPONSE=""
+if [ ${#RESPONSE} -gt "$MAX_BYTES" ]; then
+  json_error " Curl Err" "GraphQL response exceeded limit."
+  exit 1
+fi
 
 if [[ -z "$RESPONSE" ]]; then
   json_error " Curl Err" "GraphQL request returned empty."

@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Run omarchy agent headlessly in a repo to review changes and create a commit.
+# Run the default Omarchy coding agent in a repo to review changes and commit.
 set -euo pipefail
+
+dir=${1:?repo path required}
+[[ -d $dir && -e $dir/.git ]] || exit 1
+
+name=$(basename -- "$dir")
+prompt='Review the git changes in this repository, stage the appropriate files, and create a commit with a concise message that follows the project'\''s commit conventions. Do not push.'
 
 notify() {
   command -v notify-send >/dev/null 2>&1 || return 0
-  notify-send -a evo.github -t "${3:-5000}" "${1:-GitHub}" "${2:-}"
+  local summary body
+  summary=$(printf '%s' "${1:-GitHub}" | tr -d '<>&')
+  body=$(printf '%s' "${2:-}" | tr -d '<>&')
+  notify-send -a evo.github -t "${3:-5000}" "$summary" "$body"
 }
-
-dir=${1:?repo path required}
-name="$(basename "$dir")"
-prompt="Review the git changes in this repository, stage the appropriate files, and create a commit with a concise message that follows the project's commit conventions. Do not push."
 
 if ! command -v omarchy >/dev/null 2>&1; then
   notify "GitHub" "Could not start agent: omarchy not found"
@@ -19,14 +24,15 @@ fi
 notify "GitHub" "Agent committing in ${name}…"
 
 (
-  cd "$dir"
-  log="$(mktemp "${TMPDIR:-/tmp}/evo-github-agent.XXXXXX")"
-  trap 'rm -f "$log"' EXIT
+  cd -- "$dir"
+  : "${XDG_RUNTIME_DIR:?}"
+  log=$(mktemp -p "$XDG_RUNTIME_DIR" evo-github-agent.XXXXXX)
+  trap 'rm -f -- "$log"' EXIT
   if omarchy agent prompt --inline "$prompt" >"$log" 2>&1; then
     notify "GitHub" "Commit finished in ${name}" 8000
   else
-    err="$(tail -n 3 "$log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
-    [[ -n "$err" ]] || err="agent exited with an error"
+    err=$(tail -n 3 "$log" | tr -d '<>&' | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
+    [[ -n $err ]] || err="agent exited with an error"
     notify "GitHub" "Agent commit failed in ${name}: ${err}" 10000
   fi
 ) &

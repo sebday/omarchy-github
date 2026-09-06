@@ -75,9 +75,9 @@ Panel {
   readonly property bool iconError: !loading && !hasData && statusText !== ""
   readonly property bool iconBusy: loading
   readonly property bool iconMuted: false
-  readonly property string barTooltip: hasData
+  readonly property string barTooltip: Model.plain(hasData
     ? (data.today + " contribution" + (data.today === 1 ? "" : "s") + " today")
-    : "GitHub contributions"
+    : "GitHub contributions")
 
   readonly property int trendsSpacing: 3
   readonly property var trendCells: hasData ? Model.sparkBars(cells, palette, 40) : []
@@ -310,27 +310,43 @@ Panel {
 
   Process {
     id: statusProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var raw = String(text || "").trim()
+    onStarted: { stdoutBuf = ""; stderrBuf = "" }
+
+    property string stdoutBuf: ""
+    property string stderrBuf: ""
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        statusProc.stdoutBuf += chunk
+        if (statusProc.stdoutBuf.length > 262144) {
+          statusProc.signal(15)
+          statusProc.stdoutBuf = ""
+        }
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        statusProc.stderrBuf += chunk
+        if (statusProc.stderrBuf.length > 4096) {
+          statusProc.signal(15)
+          statusProc.stderrBuf = ""
+        }
+      }
+    }
+      onExited: function(exitCode) {
+      var raw = String(stdoutBuf || "").trim()
         if (!raw) {
           root.loading = false
           if (!root.hasData) {
-            root.applyPayload('{"class":"error","text":"No data"}')
+            root.applyPayload('{"class":"error","stdoutBuf":"No data"}')
             root.statusText = "No data"
           }
           return
         }
         root.applyPayload(raw)
-      }
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (String(text || "").trim() !== "" && !root.hasData)
-          root.applyPayload(String(text || ""))
-      }
+      if (String(stderrBuf || "").trim() !== "" && !root.hasData)
+          root.applyPayload(String(stderrBuf || ""))
     }
   }
 
@@ -344,57 +360,111 @@ Panel {
 
   Process {
     id: repoProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var raw = String(text || "").trim()
+    onStarted: { stdoutBuf = ""; stderrBuf = "" }
+
+    property string stdoutBuf: ""
+    property string stderrBuf: ""
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        repoProc.stdoutBuf += chunk
+        if (repoProc.stdoutBuf.length > 262144) {
+          repoProc.signal(15)
+          repoProc.stdoutBuf = ""
+        }
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        repoProc.stderrBuf += chunk
+        if (repoProc.stderrBuf.length > 4096) {
+          repoProc.signal(15)
+          repoProc.stderrBuf = ""
+        }
+      }
+    }
+      onExited: function(exitCode) {
+      var raw = String(stdoutBuf || "").trim()
         if (!raw) {
           root.repoLoading = false
           return
         }
         root.applyRepoPayload(raw)
-      }
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (String(text || "").trim() !== "" && root.repoLoading)
-          root.applyRepoPayload('{"ok":false,"error":"' + String(text).replace(/"/g, '\\"') + '"}')
-      }
+      if (String(stderrBuf || "").trim() !== "" && root.repoLoading)
+          root.applyRepoPayload('{"ok":false,"error":"' + String(stderrBuf).replace(/"/g, '\\"') + '"}')
     }
   }
 
   Process {
     id: repoSetupProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var parsed = Model.parseRepoDetectPayload(String(text || ""))
+    onStarted: { stdoutBuf = ""; stderrBuf = "" }
+
+    property string stdoutBuf: ""
+    property string stderrBuf: ""
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        repoSetupProc.stdoutBuf += chunk
+        if (repoSetupProc.stdoutBuf.length > 262144) {
+          repoSetupProc.signal(15)
+          repoSetupProc.stdoutBuf = ""
+        }
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        repoSetupProc.stderrBuf += chunk
+        if (repoSetupProc.stderrBuf.length > 4096) {
+          repoSetupProc.signal(15)
+          repoSetupProc.stderrBuf = ""
+        }
+      }
+    }
+      onExited: function(exitCode) {
+      var parsed = Model.parseRepoDetectPayload(String(stdoutBuf || ""))
         if (parsed.ok !== true) {
           root.repoSetupError = parsed.error || "Detect failed"
           root.repoSetupCandidates = []
           return
         }
         root.repoSetupCandidates = parsed.candidates
-      }
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (String(text || "").trim() !== "")
-          root.repoSetupError = String(text || "").trim()
-      }
+      if (String(stderrBuf || "").trim() !== "")
+          root.repoSetupError = String(stderrBuf || "").trim()
     }
   }
 
   Process {
     id: repoSettingsSaveProc
+    onStarted: { stdoutBuf = ""; stderrBuf = "" }
+
+    property string stdoutBuf: ""
+    property string stderrBuf: ""
     property string rootsJson: "[]"
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        root.repoSetupSaving = false
-        var parsed = Model.parseRepoSettingsPayload(String(text || ""))
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        repoSettingsSaveProc.stdoutBuf += chunk
+        if (repoSettingsSaveProc.stdoutBuf.length > 262144) {
+          repoSettingsSaveProc.signal(15)
+          repoSettingsSaveProc.stdoutBuf = ""
+        }
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        repoSettingsSaveProc.stderrBuf += chunk
+        if (repoSettingsSaveProc.stderrBuf.length > 4096) {
+          repoSettingsSaveProc.signal(15)
+          repoSettingsSaveProc.stderrBuf = ""
+        }
+      }
+    }
+      onExited: function(exitCode) {
+      root.repoSetupSaving = false
+        var parsed = Model.parseRepoSettingsPayload(String(stdoutBuf || ""))
         if (parsed.ok !== true) {
           root.repoSetupError = parsed.error || "Save failed"
           return
@@ -403,15 +473,9 @@ Panel {
         root.configuredRepoRoots = parsed.repoRoots instanceof Array ? parsed.repoRoots : []
         root.repoSetupCandidates = []
         root.refreshRepos(true)
-      }
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        root.repoSetupSaving = false
-        if (String(text || "").trim() !== "")
-          root.repoSetupError = String(text || "").trim()
-      }
+      root.repoSetupSaving = false
+        if (String(stderrBuf || "").trim() !== "")
+          root.repoSetupError = String(stderrBuf || "").trim()
     }
   }
 
@@ -464,6 +528,7 @@ Panel {
           spacing: Style.space(12)
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: root.loading
             text: "Loading contributions…"
@@ -475,6 +540,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: !root.loading && !root.hasData
             text: root.statusText
@@ -502,6 +568,7 @@ Panel {
 
               iconComponent: Component {
                 Text {
+                  textFormat: Text.PlainText
                   text: "󰊤"
                   color: root.todayIconColor
                   font.family: root.fontFamily
@@ -628,6 +695,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: root.cells.length === 0
               text: "No activity data"
@@ -652,6 +720,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: root.repoLoading
             text: "Scanning repos…"
@@ -662,6 +731,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: root.repoError
             text: root.repoStatusText
@@ -678,6 +748,7 @@ Panel {
             spacing: Style.space(8)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: "Choose folders to scan for dirty repos"
               color: root.foreground
@@ -704,6 +775,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: root.repoSetupCandidates.length === 0 && root.repoSetupError === ""
               text: "No ~/projects, ~/Projects, ~/work, or ~/Work folders found. Add paths in shell.json or run omarchy bar set evo.github repoRoots."
@@ -714,6 +786,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: root.repoSetupError !== ""
               text: root.repoSetupError
@@ -732,6 +805,7 @@ Panel {
               onClicked: root.saveRepoRoots()
 
               Text {
+                textFormat: Text.PlainText
                 id: saveRepoRootsLabel
                 anchors.centerIn: parent
                 text: root.repoSetupSaving ? "Saving…" : "Save folders"
@@ -744,6 +818,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured && root.repoList.length === 0
             text: root.repoCleanMessage
@@ -803,6 +878,7 @@ Panel {
                           spacing: Style.spacing.labelGap
 
                           Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: modelData.name || ""
                             color: (repoHeaderHit.containsMouse || root.repoExpanded(modelData.path))
@@ -814,6 +890,7 @@ Panel {
                           }
 
                           Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: "~/" + (modelData.parent || "projects") + "/" + (modelData.name || "")
                             color: root.dim
@@ -890,6 +967,7 @@ Panel {
                             spacing: Style.space(8)
 
                             Text {
+                              textFormat: Text.PlainText
                               width: Style.space(72)
                               text: modelData.label
                               color: root.dim
@@ -898,6 +976,7 @@ Panel {
                             }
 
                             Text {
+                              textFormat: Text.PlainText
                               width: parent.width - Style.space(72) - parent.spacing
                               text: modelData.value
                               color: root.foreground
@@ -959,6 +1038,7 @@ Panel {
     cursorShape: Qt.PointingHandCursor
 
     Text {
+      textFormat: Text.PlainText
       id: iconText
       anchors.centerIn: parent
       text: parent.icon
@@ -1019,6 +1099,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       id: countText
       anchors.centerIn: parent
       text: parent.loading ? "…" : String(parent.rounded)
@@ -1041,6 +1122,7 @@ Panel {
     color: Qt.rgba(textColor.r, textColor.g, textColor.b, 0.14)
 
     Text {
+      textFormat: Text.PlainText
       id: pillText
       anchors.centerIn: parent
       text: parent.text
@@ -1084,6 +1166,7 @@ Panel {
       spacing: Style.spacing.labelGap
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: tile.displayValue
         color: tile.valueColor
@@ -1095,6 +1178,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: tile.label
         color: root.dim
