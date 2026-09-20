@@ -48,6 +48,8 @@ omarchy bar set evo.github refreshMinutes 15 --json
 
 On first open, the panel detects `~/projects`, `~/Projects`, `~/work`, and `~/Work` and asks which folders to scan. Until you save, no repo scan runs.
 
+Repos with local changes or unpushed commits appear in the panel. Expand a repo to commit, push, or open it in a terminal. `Push all` pushes every repo with unpushed commits sequentially and reports the result in a desktop notification.
+
 You can also configure roots manually in `shell.json` on the `evo.github` bar entry:
 
 ```json

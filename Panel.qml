@@ -114,6 +114,7 @@ Panel {
   property string expandedRepoPath: ""
   readonly property var repoTotals: Model.repoTotals(root.repoList)
   readonly property int dirtyRepoCount: repoTotals.dirtyRepos
+  readonly property int unpushedRepoCount: repoTotals.unpushedRepos
 
   function emptyData() {
     return {
@@ -261,6 +262,20 @@ Panel {
     var dir = path ? String(path) : ""
     if (!dir || !script) return
     Quickshell.execDetached(["bash", script, dir])
+  }
+
+  function pushAllRepos() {
+    if (!repoPushScript || repoPushAllProc.running) return
+    var command = ["bash", repoPushScript]
+    for (var i = 0; i < repoList.length; i++) {
+      var repo = repoList[i]
+      if (!repo || (parseInt(repo.unpushed, 10) || 0) <= 0) continue
+      var dir = String(repo.path || "")
+      if (dir) command.push(dir)
+    }
+    if (command.length <= 2) return
+    repoPushAllProc.command = command
+    repoPushAllProc.running = true
   }
 
   function toggleRepoExpand(path) {
@@ -433,6 +448,11 @@ Panel {
       if (String(stderrBuf || "").trim() !== "")
           root.repoSetupError = String(stderrBuf || "").trim()
     }
+  }
+
+  Process {
+    id: repoPushAllProc
+    onExited: root.refreshRepos(true)
   }
 
   Process {
@@ -717,6 +737,54 @@ Panel {
             text: "LOCAL REPOS"
             foreground: root.foreground
             fontFamily: root.fontFamily
+          }
+
+          Rectangle {
+            id: pushAllButton
+            visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured
+              && root.unpushedRepoCount > 0
+            width: parent.width
+            height: pushAllContent.implicitHeight + Style.space(10)
+            radius: Style.cornerRadius
+            color: pushAllHit.containsMouse && pushAllHit.enabled
+              ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
+              : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10)
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
+
+            Row {
+              id: pushAllContent
+              anchors.centerIn: parent
+              spacing: Style.space(6)
+
+              Text {
+                textFormat: Text.PlainText
+                text: "󰁝"
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                text: repoPushAllProc.running
+                  ? "Pushing all…"
+                  : "Push all (" + root.unpushedRepoCount + ")"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+            }
+
+            MouseArea {
+              id: pushAllHit
+              anchors.fill: parent
+              enabled: !repoPushAllProc.running
+              hoverEnabled: true
+              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: root.pushAllRepos()
+            }
           }
 
           Text {
