@@ -590,7 +590,7 @@ Panel {
                 Text {
                   textFormat: Text.PlainText
                   text: "󰊤"
-                  color: root.todayIconColor
+                  color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.display
                   opacity: 0.92
@@ -598,12 +598,37 @@ Panel {
               }
 
               trailingControl: Component {
-                TodayCountBadge {
-                  loading: root.loading
-                  value: root.shownToday
-                  fillColor: root.todayIconColor
-                  fontFamily: root.fontFamily
-                  celebrateToken: root.todayCelebrateToken
+                Row {
+                  spacing: Style.space(8)
+
+                  Item {
+                    visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured
+                      && root.unpushedRepoCount > 0
+                    width: visible ? pushAllButton.width : 0
+                    height: todayBadge.height
+
+                    RepoIconButton {
+                      id: pushAllButton
+                      anchors.verticalCenter: parent.verticalCenter
+                      icon: "󰁝"
+                      tooltip: repoPushAllProc.running
+                        ? "Pushing all…"
+                        : ("Push all (" + root.unpushedRepoCount + ")")
+                      iconColor: root.accent
+                      hoverColor: root.accent
+                      fontFamily: root.fontFamily
+                      onClicked: if (!repoPushAllProc.running) root.pushAllRepos()
+                    }
+                  }
+
+                  TodayCountBadge {
+                    id: todayBadge
+                    loading: root.loading
+                    value: root.shownToday
+                    fillColor: root.todayIconColor
+                    fontFamily: root.fontFamily
+                    celebrateToken: root.todayCelebrateToken
+                  }
                 }
               }
             }
@@ -612,16 +637,10 @@ Panel {
           Row {
             visible: !root.loading && root.hasData
             width: parent.width
-            spacing: Style.space(8)
+            spacing: Style.space(16)
 
             StatTile {
-              width: (parent.width - parent.spacing * 3) / 4
-              animatedValue: root.shownTotal30
-              label: "30 days"
-            }
-
-            StatTile {
-              width: (parent.width - parent.spacing * 3) / 4
+              width: (parent.width - parent.spacing * 2) / 3
               animatedValue: root.shownStreak
               streakFormat: true
               label: "streak"
@@ -629,14 +648,14 @@ Panel {
             }
 
             StatTile {
-              width: (parent.width - parent.spacing * 3) / 4
+              width: (parent.width - parent.spacing * 2) / 3
               animatedValue: root.shownBest
               showDashWhenZero: true
               label: "best day"
             }
 
             StatTile {
-              width: (parent.width - parent.spacing * 3) / 4
+              width: (parent.width - parent.spacing * 2) / 3
               animatedValue: root.dirtyRepoCount
               label: "dirty repos"
               valueColor: root.urgent
@@ -726,66 +745,61 @@ Panel {
             }
           }
 
-          PanelSeparator {
-            visible: root.showRepoSection
-            foreground: root.foreground
-          }
-
-          PanelSectionHeader {
+          Item {
+            id: reposBox
             visible: root.showRepoSection
             width: parent.width
-            text: "LOCAL REPOS"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-          }
+            implicitHeight: reposFrame.height + (reposLegend.visible ? reposLegend.height / 2 : 0)
 
-          Rectangle {
-            id: pushAllButton
-            visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured
-              && root.unpushedRepoCount > 0
-            width: parent.width
-            height: pushAllContent.implicitHeight + Style.space(10)
-            radius: Style.cornerRadius
-            color: pushAllHit.containsMouse && pushAllHit.enabled
-              ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
-              : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10)
-            border.width: 1
-            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
+            Rectangle {
+              id: reposFrame
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.topMargin: reposLegend.visible ? reposLegend.height / 2 : 0
+              height: reposColumn.implicitHeight + Style.space(12)
+              color: "transparent"
+              radius: Style.space(8)
+              border.width: 1
+              border.color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.9)
+              antialiasing: true
+            }
 
-            Row {
-              id: pushAllContent
-              anchors.centerIn: parent
-              spacing: Style.space(6)
+            Item {
+              id: reposLegend
+              x: Style.space(14)
+              y: 0
+              width: reposLegendText.implicitWidth + Style.space(8)
+              height: Math.max(1, reposLegendText.implicitHeight)
+              visible: reposBox.visible
 
-              Text {
-                textFormat: Text.PlainText
-                text: "󰁝"
-                color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
+              Rectangle {
+                anchors.fill: parent
+                color: Color.popups.background
               }
 
               Text {
+                id: reposLegendText
+                x: Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
-                text: repoPushAllProc.running
-                  ? "Pushing all…"
-                  : "Push all (" + root.unpushedRepoCount + ")"
-                color: root.foreground
+                text: "local repos"
+                color: root.dim
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.caption
                 font.bold: true
               }
             }
 
-            MouseArea {
-              id: pushAllHit
-              anchors.fill: parent
-              enabled: !repoPushAllProc.running
-              hoverEnabled: true
-              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onClicked: root.pushAllRepos()
-            }
-          }
+            Column {
+              id: reposColumn
+              anchors.left: reposFrame.left
+              anchors.right: reposFrame.right
+              anchors.top: reposFrame.top
+              anchors.topMargin: Style.space(8)
+              anchors.leftMargin: Style.space(12)
+              anchors.rightMargin: Style.space(12)
+              spacing: Style.space(8)
 
           Text {
             textFormat: Text.PlainText
@@ -1088,6 +1102,8 @@ Panel {
               }
             }
           }
+            }
+          }
         }
       }
     }
@@ -1201,7 +1217,7 @@ Panel {
     }
   }
 
-  component StatTile: BorderSurface {
+  component StatTile: Item {
     id: tile
     property string value: ""
     property string label: ""
@@ -1222,39 +1238,61 @@ Panel {
       return String(n)
     }
 
-    implicitHeight: tileColumn.implicitHeight + Style.spacing.lg * 2
-    color: Color.popups.background
-    borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, 1)
-    radius: Style.cornerRadius
+    implicitWidth: Style.space(108)
+    implicitHeight: Style.font.heading + Style.space(56)
 
-    Column {
-      id: tileColumn
-      anchors.centerIn: parent
-      width: parent.width - Style.spacing.lg * 2
-      spacing: Style.spacing.labelGap
+    Rectangle {
+      id: frame
+      anchors.fill: parent
+      anchors.topMargin: legendChip.visible ? legendChip.height / 2 : 0
+      color: "transparent"
+      radius: Style.space(8)
+      border.width: 1
+      border.color: Qt.rgba(root.dim.r, root.dim.g, root.dim.b, 0.9)
+      antialiasing: true
+    }
 
-      Text {
-        textFormat: Text.PlainText
-        width: parent.width
-        text: tile.displayValue
-        color: tile.valueColor
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.title
-        font.bold: true
-        horizontalAlignment: Text.AlignHCenter
-        elide: Text.ElideRight
+    Item {
+      id: legendChip
+      x: Style.space(14)
+      y: 0
+      width: legendTextItem.implicitWidth + Style.space(8)
+      height: Math.max(1, legendTextItem.implicitHeight)
+      visible: tile.label !== ""
+
+      Rectangle {
+        anchors.fill: parent
+        color: Color.popups.background
       }
 
       Text {
+        id: legendTextItem
+        x: Style.space(4)
+        anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
-        width: parent.width
         text: tile.label
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
-        horizontalAlignment: Text.AlignHCenter
-        elide: Text.ElideRight
+        font.bold: true
       }
+    }
+
+    Text {
+      anchors.fill: frame
+      anchors.leftMargin: Style.space(8)
+      anchors.rightMargin: Style.space(8)
+      textFormat: Text.PlainText
+      text: tile.displayValue
+      color: tile.valueColor
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.display
+      font.bold: true
+      horizontalAlignment: Text.AlignHCenter
+      verticalAlignment: Text.AlignVCenter
+      elide: Text.ElideRight
+      fontSizeMode: Text.HorizontalFit
+      minimumPixelSize: Style.font.body
     }
   }
 }
