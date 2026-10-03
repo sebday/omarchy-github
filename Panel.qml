@@ -92,6 +92,7 @@ Panel {
   readonly property string repoScript: Qt.resolvedUrl("bin/repo-dirty-status").toString().replace("file://", "")
   readonly property string repoSettingsScript: Qt.resolvedUrl("bin/repo-settings").toString().replace("file://", "")
   readonly property string repoCommitScript: Qt.resolvedUrl("bin/repo-agent-commit").toString().replace("file://", "")
+  readonly property string repoCommitAllScript: Qt.resolvedUrl("bin/repo-agent-commit-all").toString().replace("file://", "")
   readonly property string repoPushScript: Qt.resolvedUrl("bin/repo-git-push").toString().replace("file://", "")
   readonly property int refreshMinutes: Math.max(5, parseInt(setting("refreshMinutes", 15), 10) || 15)
 
@@ -262,6 +263,20 @@ Panel {
     var dir = path ? String(path) : ""
     if (!dir || !script) return
     Quickshell.execDetached(["bash", script, dir])
+  }
+
+  function commitAllRepos() {
+    if (!repoCommitAllScript || repoCommitAllProc.running) return
+    var command = ["bash", repoCommitAllScript]
+    for (var i = 0; i < repoList.length; i++) {
+      var repo = repoList[i]
+      if (!repo || repo.unstaged !== true) continue
+      var dir = String(repo.path || "")
+      if (dir) command.push(dir)
+    }
+    if (command.length <= 2) return
+    repoCommitAllProc.command = command
+    repoCommitAllProc.running = true
   }
 
   function pushAllRepos() {
@@ -451,6 +466,11 @@ Panel {
   }
 
   Process {
+    id: repoCommitAllProc
+    onExited: root.refreshRepos(true)
+  }
+
+  Process {
     id: repoPushAllProc
     onExited: root.refreshRepos(true)
   }
@@ -600,6 +620,26 @@ Panel {
               trailingControl: Component {
                 Row {
                   spacing: Style.space(8)
+
+                  Item {
+                    visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured
+                      && root.dirtyRepoCount > 0
+                    width: visible ? commitAllButton.width : 0
+                    height: todayBadge.height
+
+                    RepoIconButton {
+                      id: commitAllButton
+                      anchors.verticalCenter: parent.verticalCenter
+                      icon: "󰜘"
+                      tooltip: repoCommitAllProc.running
+                        ? "Committing all…"
+                        : ("Commit all (" + root.dirtyRepoCount + ")")
+                      iconColor: root.urgent
+                      hoverColor: root.urgent
+                      fontFamily: root.fontFamily
+                      onClicked: if (!repoCommitAllProc.running) root.commitAllRepos()
+                    }
+                  }
 
                   Item {
                     visible: !root.repoLoading && !root.repoError && !root.repoUnconfigured
